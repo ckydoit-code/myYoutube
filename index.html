@@ -78,7 +78,7 @@ let apiKey = localStorage.getItem('yt_api_key') || '';
 let fh = null;                                  // linked file handle (Chrome/Edge)
 let fileMsg = '', fileNeedsPerm = false;
 let view = 'home', tab = 'channels';
-let cur = null, tokens = [''], page = 0, items = [], nextTok = '', loading = false, errMsg = '';
+let kind = 'all', cur = null, tokens = [''], page = 0, items = [], nextTok = '', loading = false, errMsg = '';
 const cache = {};                               // videoId -> video object
 
 try { const l = JSON.parse(localStorage.getItem('yt_data')); if (l) S = { channels: l.channels || [], favourites: l.favourites || [] }; } catch {}
@@ -153,16 +153,21 @@ async function addChannel() {
   } catch (e) { errMsg = e.message; }
   render();
 }
+const PFX = { all: '', videos: 'UULF', shorts: 'UUSH', live: 'UULV' };
+const plId = () => kind === 'all' ? cur.uploads : PFX[kind] + cur.uploads.slice(2);
 async function loadPage() {
   loading = true; errMsg = ''; render();
   try {
-    const j = await api('playlistItems', { part: 'snippet,contentDetails', playlistId: cur.uploads, maxResults: 12, pageToken: tokens[page] });
+    const j = await api('playlistItems', { part: 'snippet,contentDetails', playlistId: plId(), maxResults: 12, pageToken: tokens[page] });
     items = j.items.filter(i => i.snippet.thumbnails && i.snippet.title !== 'Private video' && i.snippet.title !== 'Deleted video').map(i => {
       const v = { id: i.contentDetails.videoId, title: i.snippet.title, thumb: i.snippet.thumbnails.medium?.url || i.snippet.thumbnails.default.url, channel: cur.title, date: (i.contentDetails.videoPublishedAt || i.snippet.publishedAt || '').slice(0, 10) };
       cache[v.id] = v; return v;
     });
     nextTok = j.nextPageToken || ''; if (nextTok) tokens[page + 1] = nextTok;
-  } catch (e) { errMsg = e.message; items = []; }
+  } catch (e) {
+    errMsg = kind !== 'all' && /not be found|playlistNotFound/i.test(e.message) ? 'This channel has no ' + kind + ' content (or YouTube has no list for it). Try "All".' : e.message;
+    items = []; nextTok = '';
+  }
   loading = false; render();
 }
 
@@ -197,7 +202,7 @@ function render() {
   const app = $('#app');
   if (view === 'channel') {
     app.innerHTML = `<button data-go="home">← Back to channels</button>
-      <h1 style="margin-top:16px">${esc(cur.title)}</h1><p class="sub">Page ${page + 1}</p>
+      <h1 style="margin-top:16px">${esc(cur.title)}</h1><div class="tabs" style="margin-top:6px">${[['all', 'All'], ['videos', 'Videos'], ['shorts', 'Shorts'], ['live', 'Live']].map(([k, n]) => `<button data-kind="${k}" class="${kind === k ? 'on' : ''}">${n}</button>`).join('')}</div>
       ${errMsg ? `<p class="err">${esc(errMsg)}</p>` : ''}
       ${loading ? '<div class="empty">Loading videos…</div>' : items.length ? `<div class="grid">${items.map(vidCard).join('')}</div>` : '<div class="empty">No videos on this page.</div>'}
       <div class="pager"><button data-pg="-1" ${page === 0 || loading ? 'disabled' : ''}>← Previous</button><span class="mut">Page ${page + 1}</span><button data-pg="1" ${!nextTok || loading ? 'disabled' : ''}>Next →</button></div>`;
@@ -218,13 +223,14 @@ function render() {
   if (!window.showOpenFilePicker) { $('#openF').disabled = $('#newF').disabled = true; }
 }
 $('#app').addEventListener('click', async e => {
-  const t = e.target.closest('[data-open],[data-del],[data-play],[data-fav],[data-tab],[data-go],[data-pg]'); if (!t) return;
+  const t = e.target.closest('[data-open],[data-del],[data-play],[data-fav],[data-tab],[data-go],[data-pg],[data-kind]'); if (!t) return;
   const d = t.dataset;
   if (d.del) { e.stopPropagation(); S.channels = S.channels.filter(c => c.id !== d.del); await save(); render(); }
-  else if (d.open) { cur = S.channels.find(c => c.id === d.open); view = 'channel'; tokens = ['']; page = 0; nextTok = ''; items = []; errMsg = ''; loadPage(); }
+  else if (d.open) { cur = S.channels.find(c => c.id === d.open); view = 'channel'; kind = 'all'; tokens = ['']; page = 0; nextTok = ''; items = []; errMsg = ''; loadPage(); }
   else if (d.play) play(d.play);
   else if (d.fav) toggleFav(d.fav);
   else if (d.tab) { tab = d.tab; render(); }
+  else if (d.kind) { kind = d.kind; tokens = ['']; page = 0; nextTok = ''; items = []; loadPage(); }
   else if (d.go) { view = 'home'; errMsg = ''; render(); }
   else if (d.pg) { page += +d.pg; loadPage(); scrollTo(0, 0); }
 });
