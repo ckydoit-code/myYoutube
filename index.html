@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>My Channels</title>
+<style>
+:root{--bg:#f3f1ee;--card:#fff;--tx:#1b1b1d;--mut:#6b6b70;--ac:#c4161c;--bd:#dcd8d2;--ok:#1d7a46;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#161617;--card:#212123;--tx:#ececee;--mut:#9a9aa0;--ac:#ff5a5f;--bd:#37373b;--ok:#4cc38a;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 60px}
+h1{font:700 28px/1.2 Georgia,"Times New Roman",serif;margin:0 0 4px}
+h2{font:600 18px/1.3 Georgia,serif;margin:28px 0 10px}
+p.sub{margin:0 0 18px;color:var(--mut)}
+.panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input{flex:1 1 220px;padding:9px 11px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit;min-width:0}
+button{padding:9px 14px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx);font:inherit;cursor:pointer}
+button:hover{border-color:var(--tx)}
+button.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+.mut{color:var(--mut);font-size:13px}
+.ok{color:var(--ok)}
+.err{color:var(--ac);font-size:14px;margin:8px 0 0}
+.tabs{display:flex;gap:8px;margin:22px 0 4px}
+.tabs button.on{background:var(--tx);color:var(--bg);border-color:var(--tx)}
+.chlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.ch{display:flex;align-items:center;gap:12px;padding:10px;background:var(--card);border:1px solid var(--bd);border-radius:10px;cursor:pointer;text-align:left;width:100%}
+.ch img{width:48px;height:48px;border-radius:50%;object-fit:cover;background:var(--bd)}
+.ch b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch .x{margin-left:auto;padding:2px 8px;border:0;background:none;color:var(--mut);font-size:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.vid{background:var(--card);border:1px solid var(--bd);border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.vid .th{position:relative;border:0;padding:0;background:#000;border-radius:0;aspect-ratio:16/9;width:100%}
+.vid .th img{width:100%;height:100%;object-fit:cover;display:block}
+.vid .th span{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;color:#fff;background:rgba(0,0,0,.25)}
+.vid .in{padding:10px;display:flex;flex-direction:column;gap:6px;flex:1}
+.vid .t{font-weight:600;font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.vid .act{margin-top:auto;display:flex;gap:6px}
+.vid .act button{padding:5px 10px;font-size:13px}
+.fav.on{color:var(--ac);border-color:var(--ac)}
+.pager{display:flex;justify-content:center;align-items:center;gap:14px;margin:22px 0}
+.empty{padding:26px;text-align:center;color:var(--mut);border:1px dashed var(--bd);border-radius:10px}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.82);display:none;place-items:center;padding:16px;z-index:10}
+#modal.open{display:grid}
+#modal .box{width:min(960px,100%);background:var(--card);border-radius:10px;padding:12px}
+#modal .frame{aspect-ratio:16/9;width:100%;background:#000;border-radius:6px;overflow:hidden}
+#modal iframe{width:100%;height:100%;border:0}
+#modal h3{margin:10px 2px;font-size:16px}
+a{color:var(--ac)}
+</style>
+</head>
+<body>
+<main id="app"></main>
+
+<div id="modal" role="dialog" aria-modal="true" aria-label="Video player">
+  <div class="box">
+    <div class="frame" id="frame"></div>
+    <h3 id="mTitle"></h3>
+    <div class="row">
+      <button id="mFav" class="fav"></button>
+      <a id="mYt" target="_blank" rel="noopener">Open on YouTube</a>
+      <button id="mClose" style="margin-left:auto">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- state ---------- */
+let S = { channels: [], favourites: [] };      // saved to localStorage and to the linked txt file
+let apiKey = localStorage.getItem('yt_api_key') || '';
+let fh = null;                                  // linked file handle (Chrome/Edge)
+let fileMsg = '', fileNeedsPerm = false;
+let view = 'home', tab = 'channels';
+let cur = null, tokens = [''], page = 0, items = [], nextTok = '', loading = false, errMsg = '';
+const cache = {};                               // videoId -> video object
+
+try { const l = JSON.parse(localStorage.getItem('yt_data')); if (l) S = { channels: l.channels || [], favourites: l.favourites || [] }; } catch {}
+
+/* ---------- saving: localStorage + optional txt file ---------- */
+async function save() {
+  localStorage.setItem('yt_data', JSON.stringify(S));
+  if (!fh) return;
+  try {
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(S, null, 2));
+    await w.close();
+    fileMsg = 'Saved to ' + fh.name;
+  } catch (e) { fileMsg = 'Could not write file: ' + e.message; }
+  if (view === 'home') { const el = $('#fileMsg'); if (el) el.textContent = fileMsg; }
+}
+const TYPES = [{ description: 'Text file', accept: { 'text/plain': ['.txt'] } }];
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open('ytapp', 1); r.onupgradeneeded = () => r.result.createObjectStore('k'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function idbSet(v) { try { (await idb()).transaction('k', 'readwrite').objectStore('k').put(v, 'fh'); } catch {} }
+async function idbGet() { try { const d = await idb(); return await new Promise(r => { const q = d.transaction('k').objectStore('k').get('fh'); q.onsuccess = () => r(q.result); q.onerror = () => r(); }); } catch {} }
+
+async function loadFile() {
+  const txt = await (await fh.getFile()).text();
+  if (txt.trim()) { const d = JSON.parse(txt); S = { channels: d.channels || [], favourites: d.favourites || [] }; }
+  else await save();
+  localStorage.setItem('yt_data', JSON.stringify(S));
+  fileMsg = 'Linked to ' + fh.name; fileNeedsPerm = false;
+}
+async function openFile() {
+  try { [fh] = await showOpenFilePicker({ types: TYPES }); await idbSet(fh); await loadFile(); } catch (e) { if (e.name !== 'AbortError') fileMsg = e.message; }
+  render();
+}
+async function newFile() {
+  try { fh = await showSaveFilePicker({ suggestedName: 'yt-data.txt', types: TYPES }); await idbSet(fh); await save(); fileMsg = 'Linked to ' + fh.name; } catch (e) { if (e.name !== 'AbortError') fileMsg = e.message; }
+  render();
+}
+async function reconnect() {
+  const h = await idbGet(); if (!h) return;
+  if (await h.requestPermission({ mode: 'readwrite' }) === 'granted') { fh = h; try { await loadFile(); } catch (e) { fileMsg = e.message; } }
+  render();
+}
+async function restoreFile() {
+  if (!window.showOpenFilePicker) { fileMsg = 'This browser cannot write to a file. Data is kept in browser storage only. Use Chrome or Edge to link a txt file.'; return; }
+  const h = await idbGet(); if (!h) return;
+  if (await h.queryPermission({ mode: 'readwrite' }) === 'granted') { fh = h; try { await loadFile(); } catch (e) { fileMsg = e.message; } }
+  else { fileNeedsPerm = true; fileMsg = 'Linked file: ' + h.name; }
+}
+
+/* ---------- YouTube API ---------- */
+async function api(path, params) {
+  if (!apiKey) throw new Error('Add your API key first.');
+  const u = new URL('https://www.googleapis.com/youtube/v3/' + path);
+  u.search = new URLSearchParams({ ...params, key: apiKey });
+  const r = await fetch(u); const j = await r.json();
+  if (!r.ok) throw new Error(j.error?.message || 'Request failed (' + r.status + ')');
+  return j;
+}
+async function addChannel() {
+  const v = $('#chIn').value.trim(); if (!v) return;
+  const p = { part: 'snippet,contentDetails' }; let m;
+  if (m = v.match(/(UC[\w-]{22})/)) p.id = m[1];
+  else if (m = v.match(/youtube\.com\/user\/([\w.-]+)/)) p.forUsername = m[1];
+  else if (m = v.match(/@([\w.\-]+)/)) p.forHandle = '@' + m[1];
+  else p.forHandle = '@' + v.replace(/^@/, '');
+  errMsg = ''; $('#addBtn').disabled = true;
+  try {
+    const j = await api('channels', p);
+    const c = j.items?.[0]; if (!c) throw new Error('No channel found for "' + v + '".');
+    if (S.channels.some(x => x.id === c.id)) throw new Error(c.snippet.title + ' is already in your list.');
+    S.channels.push({ id: c.id, title: c.snippet.title, thumb: c.snippet.thumbnails?.default?.url || '', uploads: c.contentDetails.relatedPlaylists.uploads });
+    await save();
+  } catch (e) { errMsg = e.message; }
+  render();
+}
+async function loadPage() {
+  loading = true; errMsg = ''; render();
+  try {
+    const j = await api('playlistItems', { part: 'snippet,contentDetails', playlistId: cur.uploads, maxResults: 12, pageToken: tokens[page] });
+    items = j.items.filter(i => i.snippet.thumbnails && i.snippet.title !== 'Private video' && i.snippet.title !== 'Deleted video').map(i => {
+      const v = { id: i.contentDetails.videoId, title: i.snippet.title, thumb: i.snippet.thumbnails.medium?.url || i.snippet.thumbnails.default.url, channel: cur.title, date: (i.contentDetails.videoPublishedAt || i.snippet.publishedAt || '').slice(0, 10) };
+      cache[v.id] = v; return v;
+    });
+    nextTok = j.nextPageToken || ''; if (nextTok) tokens[page + 1] = nextTok;
+  } catch (e) { errMsg = e.message; items = []; }
+  loading = false; render();
+}
+
+/* ---------- actions ---------- */
+const isFav = id => S.favourites.some(f => f.id === id);
+async function toggleFav(id) {
+  const v = cache[id] || S.favourites.find(f => f.id === id); if (!v) return;
+  if (isFav(id)) S.favourites = S.favourites.filter(f => f.id !== id); else S.favourites.push(v);
+  await save(); render(); if ($('#modal').classList.contains('open')) paintModalFav(id);
+}
+function play(id) {
+  const v = cache[id] || S.favourites.find(f => f.id === id); if (!v) return;
+  $('#frame').innerHTML = `<iframe src="https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+  $('#mTitle').textContent = v.title; $('#mYt').href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(id);
+  $('#modal').dataset.id = id; paintModalFav(id); $('#modal').classList.add('open');
+}
+function paintModalFav(id) { const b = $('#mFav'); b.classList.toggle('on', isFav(id)); b.textContent = isFav(id) ? '★ In favourites' : '☆ Add to favourites'; }
+function closeModal() { $('#modal').classList.remove('open'); $('#frame').innerHTML = ''; }
+$('#mClose').onclick = closeModal;
+$('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
+$('#mFav').onclick = () => toggleFav($('#modal').dataset.id);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* ---------- rendering ---------- */
+function vidCard(v) {
+  return `<article class="vid">
+    <button class="th" data-play="${esc(v.id)}" aria-label="Play ${esc(v.title)}"><img src="${esc(v.thumb)}" alt="" loading="lazy"><span>▶</span></button>
+    <div class="in"><div class="t">${esc(v.title)}</div><div class="mut">${esc(v.channel)}${v.date ? ' · ' + esc(v.date) : ''}</div>
+    <div class="act"><button data-play="${esc(v.id)}">Play</button><button class="fav ${isFav(v.id) ? 'on' : ''}" data-fav="${esc(v.id)}">${isFav(v.id) ? '★ Favourite' : '☆ Favourite'}</button></div></div></article>`;
+}
+function render() {
+  const app = $('#app');
+  if (view === 'channel') {
+    app.innerHTML = `<button data-go="home">← Back to channels</button>
+      <h1 style="margin-top:16px">${esc(cur.title)}</h1><p class="sub">Page ${page + 1}</p>
+      ${errMsg ? `<p class="err">${esc(errMsg)}</p>` : ''}
+      ${loading ? '<div class="empty">Loading videos…</div>' : items.length ? `<div class="grid">${items.map(vidCard).join('')}</div>` : '<div class="empty">No videos on this page.</div>'}
+      <div class="pager"><button data-pg="-1" ${page === 0 || loading ? 'disabled' : ''}>← Previous</button><span class="mut">Page ${page + 1}</span><button data-pg="1" ${!nextTok || loading ? 'disabled' : ''}>Next →</button></div>`;
+    return;
+  }
+  const chans = S.channels.length ? `<div class="chlist">${S.channels.map(c => `<div class="ch" role="button" tabindex="0" data-open="${esc(c.id)}"><img src="${esc(c.thumb)}" alt=""><b>${esc(c.title)}</b><button class="x" data-del="${esc(c.id)}" title="Remove channel" aria-label="Remove ${esc(c.title)}">×</button></div>`).join('')}</div>` : '<div class="empty">No channels yet. Paste a channel link or @handle above.</div>';
+  const favs = S.favourites.length ? `<div class="grid">${S.favourites.map(vidCard).join('')}</div>` : '<div class="empty">No favourites yet. Open a channel and tap ☆ Favourite on a video.</div>';
+  app.innerHTML = `<h1>My channels</h1><p class="sub">Pick a channel to browse its videos, or keep the ones you like in Favourites.</p>
+    <div class="panel"><div class="row"><input id="keyIn" type="password" placeholder="YouTube Data API key" value="${esc(apiKey)}" autocomplete="off"><button id="keyBtn">Save key</button></div>
+      <div class="row" style="margin-top:8px"><input id="chIn" placeholder="Channel link, @handle or channel ID"><button id="addBtn" class="pri">Add channel</button></div>
+      ${errMsg ? `<p class="err">${esc(errMsg)}</p>` : ''}
+      <div class="row" style="margin-top:10px"><button id="openF">Open data file</button><button id="newF">Create data file</button>${fileNeedsPerm ? '<button id="recF" class="pri">Reconnect file</button>' : ''}<span id="fileMsg" class="mut ${fh ? 'ok' : ''}">${esc(fileMsg || 'Not linked to a txt file. Data is kept in browser storage.')}</span></div></div>
+    <div class="tabs"><button data-tab="channels" class="${tab === 'channels' ? 'on' : ''}">Channels (${S.channels.length})</button><button data-tab="favs" class="${tab === 'favs' ? 'on' : ''}">Favourites (${S.favourites.length})</button></div>
+    ${tab === 'channels' ? chans : favs}`;
+  $('#keyBtn').onclick = () => { apiKey = $('#keyIn').value.trim(); localStorage.setItem('yt_api_key', apiKey); errMsg = ''; $('#keyBtn').textContent = 'Saved ✓'; };
+  $('#addBtn').onclick = addChannel; $('#chIn').onkeydown = e => { if (e.key === 'Enter') addChannel(); };
+  $('#openF').onclick = openFile; $('#newF').onclick = newFile; if ($('#recF')) $('#recF').onclick = reconnect;
+  if (!window.showOpenFilePicker) { $('#openF').disabled = $('#newF').disabled = true; }
+}
+$('#app').addEventListener('click', async e => {
+  const t = e.target.closest('[data-open],[data-del],[data-play],[data-fav],[data-tab],[data-go],[data-pg]'); if (!t) return;
+  const d = t.dataset;
+  if (d.del) { e.stopPropagation(); S.channels = S.channels.filter(c => c.id !== d.del); await save(); render(); }
+  else if (d.open) { cur = S.channels.find(c => c.id === d.open); view = 'channel'; tokens = ['']; page = 0; nextTok = ''; items = []; errMsg = ''; loadPage(); }
+  else if (d.play) play(d.play);
+  else if (d.fav) toggleFav(d.fav);
+  else if (d.tab) { tab = d.tab; render(); }
+  else if (d.go) { view = 'home'; errMsg = ''; render(); }
+  else if (d.pg) { page += +d.pg; loadPage(); scrollTo(0, 0); }
+});
+$('#app').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset.open) e.target.click(); });
+
+restoreFile().finally(render);
+</script>
+</body>
+</html>
